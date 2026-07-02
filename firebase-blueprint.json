@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the car rental platform",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "host", "admin"] },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "Car": {
+      "title": "Car",
+      "description": "A vehicle available for rent",
+      "type": "object",
+      "properties": {
+        "hostId": { "type": "string", "description": "UID of the host who owns the car" },
+        "make": { "type": "string" },
+        "model": { "type": "string" },
+        "year": { "type": "number" },
+        "category": { "type": "string" },
+        "pricePerDay": { "type": "number" },
+        "location": { "type": "string" },
+        "image": { "type": "string", "format": "uri" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "color": { "type": "string" },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "rating": { "type": "number" },
+        "trips": { "type": "number" },
+        "description": { "type": "string" },
+        "hostName": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["hostId", "make", "model", "year", "pricePerDay", "location", "image", "createdAt"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A rental booking",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the renter" },
+        "hostId": { "type": "string", "description": "UID of the host" },
+        "carId": { "type": "string", "description": "ID of the rented car" },
+        "days": { "type": "number" },
+        "totalFees": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "active", "completed", "cancelled"] },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["userId", "hostId", "carId", "days", "totalFees", "status", "createdAt"]
+    },
+    "Whitelist": {
+      "title": "Whitelist",
+      "description": "Whitelisted users exempt from deposits",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["email", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Saved AI assistant chats",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user" },
+        "messages": { "type": "array" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["userId", "messages", "title", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "cars/{carId}": {
+      "schema": "Car",
+      "description": "Cars available for rent"
+    },
+    "bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Rental bookings"
+    },
+    "whitelist/{whitelistId}": {
+      "schema": "Whitelist",
+      "description": "Whitelisted users"
+    },
+    "chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Saved chats"
+    }
+  }
+}

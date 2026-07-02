@@ -1,0 +1,141 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "brandon@gamersave.llc" && request.auth.token.email_verified == true));
+    }
+
+    function isHost() {
+      return isAuthenticated();
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'role', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.role in ['user', 'host', 'admin'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidCar(data) {
+      return hasRequiredFields(['hostId', 'make', 'model', 'year', 'pricePerDay', 'location', 'image', 'category', 'createdAt']) &&
+             data.hostId is string && data.hostId.size() > 0 &&
+             data.make is string && data.make.size() > 0 && data.make.size() < 50 &&
+             data.model is string && data.model.size() > 0 && data.model.size() < 50 &&
+             data.year is number && data.year > 1900 && data.year < 2100 &&
+             data.pricePerDay is number && data.pricePerDay > 0 &&
+             data.location is string && data.location.size() > 0 && data.location.size() < 100 &&
+             data.image is string && data.image.size() > 0 && data.image.size() < 5242880 &&
+             data.category is string && data.category in ['Luxury', 'Sport', 'SUV', 'Electric', 'Economy'] &&
+             (!('images' in data) || (data.images is list && data.images.size() <= 10)) &&
+             (!('color' in data) || (data.color is string && data.color.size() > 0 && data.color.size() < 50)) &&
+             (!('bookedDates' in data) || (data.bookedDates is list && data.bookedDates.size() <= 365)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidBooking(data) {
+      return hasRequiredFields(['userId', 'hostId', 'carId', 'days', 'totalFees', 'status', 'createdAt']) &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.hostId is string && data.hostId.size() > 0 &&
+             data.carId is string && data.carId.size() > 0 &&
+             data.days is number && data.days > 0 &&
+             data.totalFees is number && data.totalFees >= 0 &&
+             data.status in ['pending', 'active', 'completed', 'cancelled'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidWhitelist(data) {
+      return hasRequiredFields(['email', 'createdAt']) &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             (!('addedBy' in data) || (data.addedBy is string && data.addedBy.size() > 0 && data.addedBy.size() < 100)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidChat(data) {
+      return hasRequiredFields(['userId', 'messages', 'title', 'createdAt']) &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.messages is list && data.messages.size() > 0 && data.messages.size() <= 100 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 100 &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
+                    (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                    areImmutableFieldsUnchanged(['uid', 'createdAt', 'role']) &&
+                    (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /whitelist/{whitelistId} {
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated();
+      allow create: if isAdmin() && isValidWhitelist(request.resource.data);
+      allow update: if isAdmin() && isValidWhitelist(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow delete: if isAdmin();
+    }
+
+    match /chats/{chatId} {
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidChat(request.resource.data) && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidChat(request.resource.data) && resource.data.userId == request.auth.uid && areImmutableFieldsUnchanged(['userId', 'createdAt']);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /cars/{carId} {
+      allow read: if true; // Publicly readable
+      allow create: if isHost() && isValidCar(request.resource.data) && request.resource.data.hostId == request.auth.uid;
+      allow update: if (isHost() && resource.data.hostId == request.auth.uid && isValidCar(request.resource.data) && areImmutableFieldsUnchanged(['hostId', 'createdAt'])) || isAdmin();
+      allow delete: if (isHost() && resource.data.hostId == request.auth.uid) || isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.hostId == request.auth.uid || isAdmin());
+      allow list: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.hostId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidBooking(request.resource.data) && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidBooking(request.resource.data) &&
+                    (
+                      (resource.data.userId == request.auth.uid && areImmutableFieldsUnchanged(['userId', 'hostId', 'carId', 'days', 'totalFees', 'createdAt'])) ||
+                      (resource.data.hostId == request.auth.uid && areImmutableFieldsUnchanged(['userId', 'hostId', 'carId', 'days', 'totalFees', 'createdAt'])) ||
+                      isAdmin()
+                    );
+    }
+  }
+}
