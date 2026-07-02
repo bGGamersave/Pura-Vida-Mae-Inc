@@ -7,6 +7,7 @@ import Stripe from "stripe";
 import { initializeApp, getApps, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import firebaseConfig from "./firebase-applet-config.json" with { type: "json" };
+import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
 
@@ -79,9 +80,69 @@ function getStripe(): Stripe {
   return stripeClient;
 }
 
+// Initialize Gemini lazily
+let aiClient: GoogleGenAI | null = null;
+function getAI(): GoogleGenAI {
+  if (!aiClient) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      throw new Error('GEMINI_API_KEY environment variable is required');
+    }
+    aiClient = new GoogleGenAI({ 
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+  }
+  return aiClient;
+}
+
 // API Routes
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
+});
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { messages, userMsg, systemInstruction } = req.body;
+    if (!userMsg) {
+      return res.status(400).json({ error: "userMsg is required" });
+    }
+
+    const ai = getAI();
+    const conversationHistory = (messages || []).map((m: any) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`).join('\n');
+    const prompt = `${conversationHistory}\nUser: ${userMsg}\nAssistant:`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction
+      }
+    });
+
+    res.json({ text: response.text || 'Sorry, I could not process that.' });
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    const errorMessage = error.message || "";
+    
+    let userFriendlyMessage = "I'm sorry, I'm having trouble connecting to the Gemini API right now.";
+    
+    if (errorMessage.includes("API key not valid")) {
+      userFriendlyMessage = "I'm sorry, the chatbot assistant is currently unavailable because the configured GEMINI_API_KEY is invalid. Please check and update your API key in the **Settings > Secrets** panel of your AI Studio workspace.";
+    } else if (errorMessage.includes("denied access") || errorMessage.includes("PERMISSION_DENIED") || errorMessage.includes("denied")) {
+      userFriendlyMessage = "I'm sorry, the chatbot assistant is currently unavailable because your project or API key has been denied access (403 PERMISSION_DENIED). Please ensure that your API key is correct and has the necessary permissions enabled in your Google AI Studio account.";
+    } else if (errorMessage.includes("GEMINI_API_KEY environment variable is required")) {
+      userFriendlyMessage = "I'm sorry, the chatbot assistant is currently unavailable. Please make sure that your GEMINI_API_KEY is configured in the **Settings > Secrets** panel of your AI Studio workspace.";
+    } else {
+      userFriendlyMessage = `I'm sorry, I encountered an error while communicating with the Gemini API: ${errorMessage}. Please check your configuration in **Settings > Secrets**.`;
+    }
+    
+    res.json({ text: userFriendlyMessage });
+  }
 });
 
 app.post("/api/create-verification-session", async (req, res) => {

@@ -73,8 +73,6 @@ const Chatbot = ({ cars, user }: { cars: Car[], user: any }) => {
     setIsLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      
       const inventoryContext = cars.map(c => 
         `- ${c.make} ${c.model} (${c.year}): ${c.category}, $${c.pricePerDay}/day, Security Deposit: $${c.depositAmount || 500}. Features: ${c.features.join(', ')}. Location: ${c.location}`
       ).join('\n');
@@ -109,11 +107,25 @@ INSTRUCTIONS:
 - Be concise, friendly, professional, and only recommend cars from the inventory provided.
 - Do not make up policies or vehicles not listed here.`;
 
+      const key = (import.meta as any).env.VITE_GEMINI_API_KEY || "";
+      if (!key) {
+        throw new Error("VITE_GEMINI_API_KEY is not defined in the environment. Please add it to your Settings > Secrets with the VITE_ prefix (VITE_GEMINI_API_KEY).");
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: key,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
       const conversationHistory = messages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`).join('\n');
       const prompt = `${conversationHistory}\nUser: ${userMsg}\nAssistant:`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-preview',
+        model: 'gemini-2.5-flash',
         contents: prompt,
         config: {
           systemInstruction
@@ -121,9 +133,22 @@ INSTRUCTIONS:
       });
 
       setMessages(prev => [...prev, { role: 'model', text: response.text || 'Sorry, I could not process that.' }]);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Chatbot error:", error);
-      setMessages(prev => [...prev, { role: 'model', text: 'Sorry, I am having trouble connecting right now. Please try again later.' }]);
+      const errorMessage = error.message || "";
+      let friendlyText = 'Sorry, I am having trouble connecting right now. Please try again later.';
+      
+      if (errorMessage.includes("VITE_GEMINI_API_KEY")) {
+        friendlyText = "I'm sorry, the chatbot assistant is currently unavailable. Please make sure that your **VITE_GEMINI_API_KEY** is configured in the **Settings > Secrets** panel of your AI Studio workspace.";
+      } else if (errorMessage.includes("API key not valid")) {
+        friendlyText = "I'm sorry, the chatbot assistant is currently unavailable because the configured VITE_GEMINI_API_KEY is invalid. Please check and update your API key in the **Settings > Secrets** panel of your AI Studio workspace.";
+      } else if (errorMessage.includes("denied access") || errorMessage.includes("PERMISSION_DENIED")) {
+        friendlyText = "I'm sorry, the chatbot assistant is currently unavailable because access was denied (403 PERMISSION_DENIED). Please ensure that your API key is correct and active in the **Settings > Secrets** panel of your AI Studio workspace.";
+      } else if (errorMessage) {
+        friendlyText = `I'm sorry, I encountered an error: ${errorMessage}. Please verify your API key is correct in **Settings > Secrets**.`;
+      }
+      
+      setMessages(prev => [...prev, { role: 'model', text: friendlyText }]);
     } finally {
       setIsLoading(false);
     }
